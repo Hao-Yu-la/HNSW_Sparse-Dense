@@ -4,7 +4,7 @@
 namespace hnswlib {
 
 static float
-InnerProduct(const void *pVect1, const void *pVect2) {
+Sparse_InnerProduct(const void *pVect1, const void *pVect2) {
     vectorsizeint len1 = *((vectorsizeint *) pVect1);
     vectorsizeint len2 = *((vectorsizeint *) pVect2);
 
@@ -34,10 +34,39 @@ InnerProduct(const void *pVect1, const void *pVect2) {
 }
 
 static float
-InnerProductDistance(const void *pVect1, const void *pVect2) {
-    float ip = 1.0f - InnerProduct(pVect1, pVect2);
+Dense_InnerProduct(const void *pVect1, const void *pVect2, const void *qty_ptr) {
+    size_t qty = *((size_t *) qty_ptr);
+    float res = 0;
+    for (unsigned i = 0; i < qty; i++) {
+        res += ((vectordata_t *) pVect1)[i] * ((vectordata_t *) pVect2)[i];
+    }
+    return res;
+}
+
+static float
+Sparse_InnerProductDistance(const void *pVect1, const void *pVect2) {
+    float ip = 1.0f - Sparse_InnerProduct(pVect1, pVect2);
     return ip;
 }
+
+static float
+Dense_InnerProductDistance(const void *pVect1, const void *pVect2, const void *qty_ptr) {
+    float ip = 1.0f - Dense_InnerProduct(pVect1, pVect2, qty_ptr);
+    return ip;
+}
+
+static float
+ComputeDistance(const void *pVect1, const void *pVect2, const void *qty_ptr) {
+    size_t qty = *((size_t *) qty_ptr);
+    float dense_dist;
+    float sparse_dist;
+    float dist;
+    dense_dist = Dense_InnerProductDistance(pVect1, pVect2, qty_ptr);
+    sparse_dist = Sparse_InnerProductDistance((char *)pVect1 + qty * sizeof(vectordata_t), (char *)pVect2 + qty * sizeof(vectordata_t));
+    dist = dense_dist + sparse_dist;
+    return dist;
+}
+
 
 // #if defined(USE_AVX)
 
@@ -337,12 +366,12 @@ InnerProductDistance(const void *pVect1, const void *pVect2) {
 
 class InnerProductSpace : public SpaceInterface<float> {
     DISTFUNC<float> fstdistfunc_;
-    size_t data_size_;
-    size_t dim_;
+    size_t dense_data_size_;
+    size_t dense_dim_;
 
  public:
-    InnerProductSpace(size_t dim) {
-        fstdistfunc_ = InnerProductDistance;
+    InnerProductSpace(size_t dense_dim) {
+        fstdistfunc_ = ComputeDistance;
 // #if defined(USE_AVX) || defined(USE_SSE) || defined(USE_AVX512)
 //     #if defined(USE_AVX512)
 //         if (AVX512Capable()) {
@@ -374,17 +403,12 @@ class InnerProductSpace : public SpaceInterface<float> {
 //         else if (dim > 4)
 //             fstdistfunc_ = InnerProductDistanceSIMD4ExtResiduals;
 // #endif
-        dim_ = dim;
-        data_size_ = dim * sizeof(float);
+        dense_dim_ = dense_dim;
+        dense_data_size_ = dense_dim * sizeof(vectordata_t);
     }
 
-    size_t get_data_size() {
-        return data_size_;
-    }
-
-    //!!!!!!!!
     size_t get_dense_data_size() {
-        return dim;
+        return dense_data_size_;
     }
 
     DISTFUNC<float> get_dist_func() {
@@ -392,7 +416,7 @@ class InnerProductSpace : public SpaceInterface<float> {
     }
 
     void *get_dist_func_param() {
-        return &dim_;
+        return &dense_dim_;
     }
 
 ~InnerProductSpace() {}

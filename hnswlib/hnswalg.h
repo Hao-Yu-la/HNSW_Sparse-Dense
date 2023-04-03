@@ -44,14 +44,14 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     tableint enterpoint_node_{0};
 
     size_t size_links_level0_{0};
-    size_t offsetData_{0}, offsetLevel0_{0}, label_offset_{0};
-    size_t size_dense_data_{0};
+    size_t offsetDensedata_{0}, offsetSparsedata_{0}, offsetLevel0_{0}, label_offset_{0};
 
     char **data_level0_point_{nullptr};
     char **linkLists_{nullptr};
     std::vector<int> element_levels_;  // keeps level of each element
 
-    size_t data_size_{0};
+    // size_t data_size_{0};
+    size_t dense_data_size_{0};
 
     DISTFUNC<dist_t> fstdistfunc_;
     void *dist_func_param_{nullptr};
@@ -100,8 +100,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         max_elements_ = max_elements;
         num_deleted_ = 0;
         // data_size_ = s->get_data_size();
+        dense_data_size_ = s->get_dense_data_size();
         fstdistfunc_ = s->get_dist_func();
-        // dist_func_param_ = s->get_dist_func_param();
+        dist_func_param_ = s->get_dist_func_param();
         M_ = M;
         maxM_ = M_;
         maxM0_ = M_ * 2;
@@ -113,7 +114,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
         // size_data_per_element_ = size_links_level0_ + data_size_ + sizeof(labeltype);
-        offsetData_ = size_links_level0_;
+        offsetDensedata_ = size_links_level0_;
+        offsetSparsedata_ = size_links_level0_ + dense_data_size_;
         // label_offset_ = size_links_level0_ + data_size_;
         offsetLevel0_ = 0;
 
@@ -174,8 +176,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     inline labeltype getExternalLabel(tableint internal_id) const {
         labeltype return_label;
         vectorsizeint len = 0;
-        memcpy(&len, (data_level0_point_[internal_id] + offsetData_), sizeof(vectorsizeint));
-        size_t label_offset = offsetData_ + sizeof(vectorsizeint) + len * (sizeof(vectordata_t) + sizeof(vectorsizeint));
+        memcpy(&len, (data_level0_point_[internal_id] + offsetSparsedata_), sizeof(vectorsizeint));
+        size_t label_offset = offsetSparsedata_ + sizeof(vectorsizeint) + len * (sizeof(vectordata_t) + sizeof(vectorsizeint));
         memcpy(&return_label, (data_level0_point_[internal_id] + label_offset), sizeof(labeltype));
         return return_label;
     }
@@ -183,22 +185,22 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     inline void setExternalLabel(tableint internal_id, labeltype label) const {
         vectorsizeint len = 0;
-        memcpy(&len, (data_level0_point_[internal_id] + offsetData_), sizeof(vectorsizeint));
-        size_t label_offset = offsetData_ + sizeof(vectorsizeint) + len * (sizeof(vectordata_t) + sizeof(vectorsizeint));
+        memcpy(&len, (data_level0_point_[internal_id] + offsetSparsedata_), sizeof(vectorsizeint));
+        size_t label_offset = offsetSparsedata_ + sizeof(vectorsizeint) + len * (sizeof(vectordata_t) + sizeof(vectorsizeint));
         memcpy((data_level0_point_[internal_id] + label_offset), &label, sizeof(labeltype));
     }
 
 
     inline labeltype *getExternalLabeLp(tableint internal_id) const {
         vectorsizeint len = 0;
-        memcpy(&len, (data_level0_point_[internal_id] + offsetData_), sizeof(vectorsizeint));
-        size_t label_offset = offsetData_ + sizeof(vectorsizeint) + len * (sizeof(vectordata_t) + sizeof(vectorsizeint));
+        memcpy(&len, (data_level0_point_[internal_id] + offsetSparsedata_), sizeof(vectorsizeint));
+        size_t label_offset = offsetSparsedata_ + sizeof(vectorsizeint) + len * (sizeof(vectordata_t) + sizeof(vectorsizeint));
         return (labeltype *) (data_level0_point_[internal_id] + label_offset);
     }
 
 
     inline char *getDataByInternalId(tableint internal_id) const {
-        return (data_level0_point_[internal_id] + offsetData_);
+        return (data_level0_point_[internal_id] + offsetDensedata_);
     }
 
 
@@ -231,7 +233,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         dist_t lowerBound;
         if (!isMarkedDeleted(ep_id)) {
-            dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id));
+            dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             top_candidates.emplace(dist, ep_id);
             lowerBound = dist;
             candidateSet.emplace(-dist, ep_id);
@@ -279,7 +281,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 visited_array[candidate_id] = visited_array_tag;
                 char *currObj1 = (getDataByInternalId(candidate_id));
 
-                dist_t dist1 = fstdistfunc_(data_point, currObj1);
+                dist_t dist1 = fstdistfunc_(data_point, currObj1, dist_func_param_);
                 if (top_candidates.size() < ef_construction_ || lowerBound > dist1) {
                     candidateSet.emplace(-dist1, candidate_id);
 #ifdef USE_SSE
@@ -315,7 +317,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         dist_t lowerBound;
         if ((!has_deletions || !isMarkedDeleted(ep_id)) && ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(ep_id)))) {
-            dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id));
+            dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
             candidate_set.emplace(-dist, ep_id);
@@ -363,7 +365,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     visited_array[candidate_id] = visited_array_tag;
 
                     char *currObj1 = (getDataByInternalId(candidate_id));
-                    dist_t dist = fstdistfunc_(data_point, currObj1);
+                    dist_t dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
 
                     if (top_candidates.size() < ef || lowerBound > dist) {
                         candidate_set.emplace(-dist, candidate_id);
@@ -416,7 +418,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             for (std::pair<dist_t, tableint> second_pair : return_list) {
                 dist_t curdist =
                         fstdistfunc_(getDataByInternalId(second_pair.second),
-                                        getDataByInternalId(curent_pair.second)
+                                    getDataByInternalId(curent_pair.second),
+                                    dist_func_param_
                                     );
                 if (curdist < dist_to_query) {
                     good = false;
@@ -539,7 +542,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     setListCount(ll_other, sz_link_list_other + 1);
                 } else {
                     // finding the "weakest" element to replace it with the new one
-                    dist_t d_max = fstdistfunc_(getDataByInternalId(cur_c), getDataByInternalId(selectedNeighbors[idx]));
+                    dist_t d_max = fstdistfunc_(getDataByInternalId(cur_c), getDataByInternalId(selectedNeighbors[idx]), dist_func_param_);
                                             
                     // Heuristic:
                     std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> candidates;
@@ -547,7 +550,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
                     for (size_t j = 0; j < sz_link_list_other; j++) {
                         candidates.emplace(
-                                fstdistfunc_(getDataByInternalId(data[j]), getDataByInternalId(selectedNeighbors[idx])), data[j]);
+                                fstdistfunc_(getDataByInternalId(data[j]), getDataByInternalId(selectedNeighbors[idx]), dist_func_param_), data[j]);
                     }
 
                     getNeighborsByHeuristic2(candidates, Mcurmax);
@@ -616,7 +619,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         writeBinaryPOD(output, cur_element_count);
         // writeBinaryPOD(output, size_data_per_element_);
         // writeBinaryPOD(output, label_offset_);
-        writeBinaryPOD(output, offsetData_);
+        writeBinaryPOD(output, offsetDensedata_);
+        writeBinaryPOD(output, offsetSparsedata_);
         writeBinaryPOD(output, maxlevel_);
         writeBinaryPOD(output, enterpoint_node_);
         writeBinaryPOD(output, maxM_);
@@ -628,13 +632,13 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         // output.write(data_level0_memory_, cur_element_count * size_data_per_element_);
         vectorsizeint vactor_len = 0;
-        size_t data_size = 0;
+        size_t sparse_data_size = 0;
         size_t element_size = 0;
         for (size_t i = 0; i < cur_element_count; i++) {
             // data comprises of the vector length and the vector non-zreo elements and their indices
-            vactor_len = *((vectorsizeint *)(data_level0_point_[i] + offsetData_));
-            data_size = sizeof(vectorsizeint) + vactor_len * (sizeof(vectorsizeint) + sizeof(vectordata_t));
-            element_size = size_links_level0_ + data_size + sizeof(labeltype);
+            vactor_len = *((vectorsizeint *)(data_level0_point_[i] + offsetSparsedata_));
+            sparse_data_size = sizeof(vectorsizeint) + vactor_len * (sizeof(vectorsizeint) + sizeof(vectordata_t));
+            element_size = size_links_level0_ + dense_data_size_ + sparse_data_size + sizeof(labeltype);
             output.write(data_level0_point_[i], element_size);
         }
 
@@ -669,7 +673,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         max_elements_ = max_elements;
         // readBinaryPOD(input, size_data_per_element_);
         // readBinaryPOD(input, label_offset_);
-        readBinaryPOD(input, offsetData_);
+        readBinaryPOD(input, offsetDensedata_);
+        readBinaryPOD(input, offsetSparsedata_);
         readBinaryPOD(input, maxlevel_);
         readBinaryPOD(input, enterpoint_node_);
 
@@ -680,8 +685,9 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         readBinaryPOD(input, ef_construction_);
 
         // data_size_ = s->get_data_size();
+        dense_data_size_ = s->get_dense_data_size();
         fstdistfunc_ = s->get_dist_func();
-        // dist_func_param_ = s->get_dist_func_param();
+        dist_func_param_ = s->get_dist_func_param();
 
         auto pos = input.tellg();
 
@@ -713,16 +719,16 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
         // input.read(data_level0_memory_, cur_element_count * size_data_per_element_);
         vectorsizeint vactor_len = 0;
-        size_t data_size = 0;
+        size_t sparse_data_size = 0;
         size_t element_size = 0;
         size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
         for (size_t i = 0; i < cur_element_count; i++) {
             // data comprises of the vector length and the vector non-zreo elements and their indices
             pos = input.tellg();
-            input.seekg(size_links_level0_, input.cur);
+            input.seekg(offsetSparsedata_, input.cur);
             readBinaryPOD(input, vactor_len);
-            data_size = sizeof(vectorsizeint) + vactor_len * (sizeof(vectorsizeint) + sizeof(vectordata_t));
-            element_size = size_links_level0_ + data_size + sizeof(labeltype);
+            sparse_data_size = sizeof(vectorsizeint) + vactor_len * (sizeof(vectorsizeint) + sizeof(vectordata_t));
+            element_size = size_links_level0_ + dense_data_size_ + sparse_data_size + sizeof(labeltype);
             data_level0_point_[i] = (char *) malloc(element_size);
             if (data_level0_point_[i] == nullptr)
                 throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
@@ -994,7 +1000,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     if (cand == neigh)
                         continue;
 
-                    dist_t distance = fstdistfunc_(getDataByInternalId(neigh), getDataByInternalId(cand));
+                    dist_t distance = fstdistfunc_(getDataByInternalId(neigh), getDataByInternalId(cand), dist_func_param_);
                     if (candidates.size() < elementsToKeep) {
                         candidates.emplace(distance, cand);
                     } else {
@@ -1035,7 +1041,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         int maxLevel) {
         tableint currObj = entryPointInternalId;
         if (dataPointLevel < maxLevel) {
-            dist_t curdist = fstdistfunc_(dataPoint, getDataByInternalId(currObj));
+            dist_t curdist = fstdistfunc_(dataPoint, getDataByInternalId(currObj), dist_func_param_);
             for (int level = maxLevel; level > dataPointLevel; level--) {
                 bool changed = true;
                 while (changed) {
@@ -1053,7 +1059,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                         _mm_prefetch(getDataByInternalId(*(datal + i + 1)), _MM_HINT_T0);
 #endif
                         tableint cand = datal[i];
-                        dist_t d = fstdistfunc_(dataPoint, getDataByInternalId(cand));
+                        dist_t d = fstdistfunc_(dataPoint, getDataByInternalId(cand), dist_func_param_);
                         if (d < curdist) {
                             curdist = d;
                             currObj = cand;
@@ -1084,7 +1090,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             if (filteredTopCandidates.size() > 0) {
                 bool epDeleted = isMarkedDeleted(entryPointInternalId);
                 if (epDeleted) {
-                    filteredTopCandidates.emplace(fstdistfunc_(dataPoint, getDataByInternalId(entryPointInternalId)), entryPointInternalId);
+                    filteredTopCandidates.emplace(fstdistfunc_(dataPoint, getDataByInternalId(entryPointInternalId), dist_func_param_), entryPointInternalId);
                     if (filteredTopCandidates.size() > ef_construction_)
                         filteredTopCandidates.pop();
                 }
@@ -1154,16 +1160,16 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         tableint enterpoint_copy = enterpoint_node_;
 
         // data comprises of the vector length and the vector non-zreo elements and their indices
-        vectorsizeint vactor_len = *((vectorsizeint *) data_point);
-        size_t data_size = sizeof(vectorsizeint) + vactor_len * (sizeof(vectorsizeint) + sizeof(vectordata_t));
-        size_t element_size = size_links_level0_ + data_size + sizeof(labeltype);
+        vectorsizeint vactor_len = *((vectorsizeint *) ((char *)data_point + dense_data_size_));
+        size_t sparse_data_size = sizeof(vectorsizeint) + vactor_len * (sizeof(vectorsizeint) + sizeof(vectordata_t));
+        size_t element_size = size_links_level0_ + dense_data_size_ + sparse_data_size + sizeof(labeltype);
         data_level0_point_[cur_c] = (char *) malloc(element_size);
         memset(data_level0_point_[cur_c] + offsetLevel0_, 0, element_size);
 
         // Initialisation of the data and label
         // memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
         // setExternalLabel(cur_c, label);
-        memcpy(getDataByInternalId(cur_c), data_point, data_size);
+        memcpy(getDataByInternalId(cur_c), data_point, dense_data_size_ + sparse_data_size);
         if (curlevel) {
             linkLists_[cur_c] = (char *) malloc(size_links_per_element_ * curlevel + 1);
             if (linkLists_[cur_c] == nullptr)
@@ -1173,7 +1179,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         
         if ((signed)currObj != -1) {
             if (curlevel < maxlevelcopy) {
-                dist_t curdist = fstdistfunc_(data_point, getDataByInternalId(currObj));
+                dist_t curdist = fstdistfunc_(data_point, getDataByInternalId(currObj), dist_func_param_);
                 for (int level = maxlevelcopy; level > curlevel; level--) {
                     bool changed = true;
                     while (changed) {
@@ -1188,7 +1194,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                             tableint cand = datal[i];
                             if (cand < 0 || cand > max_elements_)
                                 throw std::runtime_error("cand error");
-                            dist_t d = fstdistfunc_(data_point, getDataByInternalId(cand));
+                            dist_t d = fstdistfunc_(data_point, getDataByInternalId(cand), dist_func_param_);
                             if (d < curdist) {
                                 curdist = d;
                                 currObj = cand;
@@ -1207,7 +1213,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                 std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> top_candidates = searchBaseLayer(
                         currObj, data_point, level);
                 if (epDeleted) {
-                    top_candidates.emplace(fstdistfunc_(data_point, getDataByInternalId(enterpoint_copy)), enterpoint_copy);
+                    top_candidates.emplace(fstdistfunc_(data_point, getDataByInternalId(enterpoint_copy), dist_func_param_), enterpoint_copy);
                     if (top_candidates.size() > ef_construction_)
                         top_candidates.pop();
                 }
@@ -1235,7 +1241,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         if (cur_element_count == 0) return result;
 
         tableint currObj = enterpoint_node_;
-        dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_));
+        dist_t curdist = fstdistfunc_(query_data, getDataByInternalId(enterpoint_node_), dist_func_param_);
 
         for (int level = maxlevel_; level > 0; level--) {
             bool changed = true;
@@ -1253,7 +1259,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
                     tableint cand = datal[i];
                     if (cand < 0 || cand > max_elements_)
                         throw std::runtime_error("cand error");
-                    dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand));
+                    dist_t d = fstdistfunc_(query_data, getDataByInternalId(cand), dist_func_param_);
 
                     if (d < curdist) {
                         curdist = d;

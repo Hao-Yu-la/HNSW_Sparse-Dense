@@ -114,7 +114,7 @@ static bool AVX512Capable() {
 
 namespace hnswlib {
 typedef size_t labeltype;
-typedef unsigned int vectorsizeint;
+typedef uint64_t vectorsizeint;
 typedef float vectordata_t;
 
 
@@ -143,13 +143,15 @@ static void readBinaryPOD(std::istream &in, T &podRef) {
 }
 
 template<typename MTYPE>
-using DISTFUNC = MTYPE(*)(const void *, const void *);
+using DISTFUNC = MTYPE(*)(const void *, const void *, const void *);
 
 template<typename MTYPE>
 class SpaceInterface {
  public:
     // virtual void search(void *);
-    virtual size_t get_data_size() = 0;
+    // virtual size_t get_data_size() = 0;
+
+    virtual size_t get_dense_data_size() = 0;
 
     virtual DISTFUNC<MTYPE> get_dist_func() = 0;
 
